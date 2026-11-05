@@ -17,18 +17,12 @@ import time
 
 try:
     import requests
-except ImportError:  # requests ada di requirements.txt
+except ImportError:  # requests harus ada di python_library_list.txt
     requests = None
-
-try:
-    import dns.resolver  # paket: dnspython
-except ImportError:
-    dns = None
 
 
 # ---------------------------------------------------------------------------
 # TASK 3.1 - BOBOT SKOR (mulai dari 100, dikurangi per temuan)
-# Angka ini usulan awal; sesuaikan bersama tim dan catat alasannya.
 # ---------------------------------------------------------------------------
 PENALTIES = {
     "ssl_invalid":        (40, "Sertifikat SSL tidak valid atau gagal diverifikasi (risiko MITM)."),
@@ -44,17 +38,14 @@ PENALTIES = {
     "check_failed":       (10, "Sebagian pemeriksaan gagal dijalankan (koneksi bermasalah)."),
 }
 
-# Batas kategori (inklusif di batas bawah)
 THRESHOLD_AMAN = 80    # 80-100 -> Aman
 THRESHOLD_RAWAN = 50   # 50-79  -> Rawan, di bawah 50 -> Bahaya
 
-TIMEOUT = 5  # detik
+TIMEOUT = 8  # detik
 
 
 # ---------------------------------------------------------------------------
 # SKENARIO SIMULASI (Task 3.5 + fallback saat deploy di cloud)
-# Server cloud tidak berada di Wi-Fi pengguna, jadi hasil asli tidak mewakili.
-# Skenario ini memberi hasil yang bisa diatur untuk demo.
 # ---------------------------------------------------------------------------
 SCENARIOS = {
     "aman": {
@@ -96,33 +87,49 @@ def check_ssl(hostname="www.google.com"):
                     result["ssl_expired"] = True
                 if result["tls_version"] in ("TLSv1", "TLSv1.1", "SSLv3"):
                     result["tls_outdated"] = True
-    except ssl.SSLCertVerificationError:
-        result["ssl_invalid"] = True
+    except ssl.SSLCertVerificationError as e:
+        if e.verify_code == 10:  # 10 = sertifikat kedaluwarsa
+            result["ssl_expired"] = True
+        else:
+            result["ssl_invalid"] = True
     except (socket.timeout, socket.gaierror, ConnectionError, OSError):
         result["check_failed"] = True
     return result
 
 
-def check_dns(domain="example.com", trusted_resolver="1.1.1.1"):
-    """Bandingkan jawaban DNS resolver Wi-Fi dengan resolver terpercaya.
+def check_dns(domain="example.com"):
+    """Bandingkan jawaban DNS Wi-Fi dengan DNS-over-HTTPS (port 443).
 
-    Catatan: domain yang memakai CDN bisa memberi IP berbeda antar resolver
-    tanpa ada serangan. Pakai domain dengan IP stabil (mis. example.com)
-    dan anggap mismatch hanya jika tidak ada IP yang sama sekali beririsan.
+    DNS biasa ke resolver publik (port 53) sering diblokir di jaringan
+    kampus/kos, jadi resolver terpercaya ditanya lewat HTTPS. Catatan: domain
+    di belakang CDN bisa memberi IP berbeda tanpa ada serangan, jadi mismatch
+    hanya dihitung jika tidak ada satu pun IP yang beririsan.
     """
     result = {"dns_mismatch": False, "check_failed": False}
+    if requests is None:
+        result["check_failed"] = True
+        return result
     try:
         local_ips = {info[4][0] for info in socket.getaddrinfo(domain, 80, socket.AF_INET)}
-        if dns is None:
+        trusted_ips = set()
+        for url, headers in (
+            ("https://cloudflare-dns.com/dns-query", {"accept": "application/dns-json"}),
+            ("https://dns.google/resolve", {}),
+        ):
+            try:
+                resp = requests.get(url, params={"name": domain, "type": "A"},
+                                    headers=headers, timeout=TIMEOUT)
+                answers = resp.json().get("Answer", [])
+                trusted_ips = {a["data"] for a in answers if a.get("type") == 1}
+                if trusted_ips:
+                    break
+            except (requests.RequestException, ValueError):
+                continue
+        if not trusted_ips:
             result["check_failed"] = True
-            return result
-        resolver = dns.resolver.Resolver(configure=False)
-        resolver.nameservers = [trusted_resolver]
-        resolver.lifetime = TIMEOUT
-        trusted_ips = {r.address for r in resolver.resolve(domain, "A")}
-        if local_ips.isdisjoint(trusted_ips):
+        elif local_ips.isdisjoint(trusted_ips):
             result["dns_mismatch"] = True
-    except Exception:
+    except OSError:
         result["check_failed"] = True
     return result
 
@@ -219,7 +226,6 @@ def audit_wifi(simulate=None):
     observations = {}
     observations.update(check_dns_and_ssl())
     header_obs = check_security_headers()
-    # gabungkan; check_failed bernilai True jika salah satu gagal
     failed = observations.get("check_failed") or header_obs["check_failed"]
     observations.update(header_obs)
     observations["check_failed"] = failed
