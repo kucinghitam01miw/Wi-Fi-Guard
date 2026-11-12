@@ -13,6 +13,7 @@ from modules.visualizer import (
     render_status_card,
     render_community_map,
     render_location_comparison,
+    render_speedometer,
 )
 
 st.set_page_config(
@@ -96,9 +97,12 @@ st.markdown(
 def load_location_data() -> tuple[list[dict], bool]:
     """Ambil ringkasan lokasi dari database; gunakan seed sebagai preview jika DB kosong."""
     try:
-        from modules.database import get_all_locations_summary, init_db
+        import modules.database as database
 
-        init_db()
+        # Repo menyimpan seed_data.json di folder data/, bukan di root.
+        database.SEED_FILE_PATH = str(Path(__file__).resolve().parent / "data" / "seed_data.json")
+        database.init_db()
+        get_all_locations_summary = database.get_all_locations_summary
         rows = get_all_locations_summary()
         if rows:
             valid_rows = [dict(row) for row in rows if row.get("latitude") is not None and row.get("longitude") is not None]
@@ -158,43 +162,158 @@ with st.sidebar:
 
 if page == "Overview":
     st.markdown(
-        '<div class="topline"><div class="eyebrow">NETWORK INTELLIGENCE PLATFORM</div><div class="page-title">Wi-Fi Overview</div><div class="page-desc">Lihat ringkasan kualitas dan keamanan jaringan Wi-Fi publik dari data komunitas.</div></div>',
+        '<div class="topline"><div class="eyebrow">NETWORK INTELLIGENCE PLATFORM</div><div class="page-title">Wi-Fi Overview</div><div class="page-desc">Hubungkan perangkat ke Wi-Fi yang ingin diuji, lalu tekan Start untuk memeriksa kualitas koneksinya.</div></div>',
         unsafe_allow_html=True,
     )
 
     if is_preview:
         st.markdown(
-            '<div class="info-banner">Dashboard sedang menampilkan data awal dari <b>data/seed_data.json</b> sebagai preview. Data ini bukan hasil pemindaian langsung dan akan tergantikan ketika database berisi hasil scan.</div>',
+            '<div class="info-banner">Lokasi komunitas di bawah berasal dari data seed untuk preview. Hasil Start Scan akan mengukur koneksi Wi-Fi yang sedang dipakai perangkatmu.</div>',
             unsafe_allow_html=True,
         )
         st.write("")
 
+    # ---------- Main scanner: retain the original Start workflow ----------
+    render_section_heading("Start Wi-Fi scan", "Pastikan perangkat sudah terhubung ke jaringan Wi-Fi yang ingin diuji.")
+    try:
+        from modules.network_scanner import NetworkDiagnostics
+        scanner_available = True
+    except Exception as exc:
+        scanner_available = False
+        st.error(f"Modul network scanner belum bisa dimuat: {exc}")
+
+    scan_col, info_col = st.columns([1.15, 1], gap="large")
+    with scan_col:
+        scan_location = st.selectbox(
+            "Lokasi pengujian",
+            [item.get("name", "Lokasi") for item in locations] or ["Lokasi saya"],
+            help="Pilih lokasi yang paling sesuai agar hasil scan bisa dicatat pada lokasi komunitas.",
+        )
+        selected_location = next((item for item in locations if item.get("name") == scan_location), None)
+        if st.button("▶  START SCAN", use_container_width=True, disabled=not scanner_available):
+            scanner = NetworkDiagnostics()
+            with st.status("Sedang memeriksa jaringan Wi-Fi...", expanded=True) as status:
+                st.write("Mendeteksi jaringan Wi-Fi yang sedang digunakan...")
+                detected_ssid, signal = scanner.check_wifi_status()
+                st.write(f"SSID terdeteksi: **{detected_ssid}** · Kekuatan sinyal: **{signal}**")
+                st.write("Mengukur ping, download, dan upload. Proses ini dapat memerlukan waktu beberapa saat...")
+                success = scanner.run_speedtest()
+                if success:
+                    st.write("Memeriksa respons beberapa layanan internet...")
+                    scanner.check_throttling()
+                    status.update(label="Pengukuran jaringan selesai", state="complete")
+                    try:
+                        from modules.security_test import audit_wifi
+                        security_result = audit_wifi()
+                    except Exception as security_exc:
+                        security_result = {
+                            "score": 0,
+                            "category": "Rawan",
+                            "findings": [f"Audit keamanan gagal dijalankan: {security_exc}"],
+                        }
+
+                    throttling_flags = [
+                        result.get("status") != "Normal"
+                        for result in scanner.throttling_results.values()
+                    ]
+                    network_result = {
+                        "download_mbps": scanner.download_speed,
+                        "upload_mbps": scanner.upload_speed,
+                        "ping_ms": scanner.ping,
+                        "jitter_ms": 0.0,
+                        "is_throttled": any(throttling_flags),
+                        "video_mbps": 0.0,
+                    }
+                    ai_result = {
+                        "summary": "Ringkasan AI belum tersedia karena modul AI Advisor belum diimplementasikan.",
+                        "suitable_for": [],
+                    }
+                    st.session_state["latest_scan"] = {
+                        "ssid": detected_ssid,
+                        "signal": signal,
+                        "network": network_result,
+                        "security": security_result,
+                        "throttling": scanner.throttling_results,
+                    }
+
+                    if selected_location and selected_location.get("location_id"):
+                        try:
+                            from modules.database import save_scan_result
+                            save_scan_result(
+                                selected_location["location_id"],
+                                network_result,
+                                security_result,
+                                ai_result,
+                            )
+                            st.session_state["scan_saved"] = True
+                        except Exception as save_exc:
+                            st.session_state["scan_saved"] = False
+                            st.session_state["scan_save_error"] = str(save_exc)
+                    else:
+                        st.session_state["scan_saved"] = False
+                else:
+                    status.update(label="Speed test gagal", state="error")
+                    st.error("Pengukuran gagal. Periksa koneksi internet dan pastikan speedtest-cli sudah terpasang.")
+
+    with info_col:
+        latest = st.session_state.get("latest_scan")
+        if latest:
+            st.markdown('<div class="panel-label">LATEST SCAN RESULT</div>', unsafe_allow_html=True)
+            st.markdown(f"**Wi-Fi:** {latest['ssid']}  ")
+            st.markdown(f"**Signal:** {latest['signal']}")
+            st.write("")
+            if st.session_state.get("scan_saved"):
+                st.success("Hasil scan berhasil disimpan ke Scan History.")
+            elif st.session_state.get("scan_save_error"):
+                st.warning(f"Hasil scan belum tersimpan: {st.session_state['scan_save_error']}")
+            else:
+                st.info("Hasil tampil, tetapi belum tersimpan ke riwayat karena lokasi belum terdaftar.")
+        else:
+            st.markdown(
+                '<div class="info-banner">Hasil pengujian akan muncul di sini setelah kamu menekan tombol START SCAN.</div>',
+                unsafe_allow_html=True,
+            )
+
+    latest = st.session_state.get("latest_scan")
+    if latest:
+        st.write("")
+        render_section_heading("Download speed", "Speedometer hasil pengukuran koneksi saat ini")
+        render_speedometer(latest["network"]["download_mbps"])
+        st.write("")
+        network = latest["network"]
+        metric_cols = st.columns(4)
+        metric_cols[0].metric("Download", f"{network['download_mbps']:.2f} Mbps")
+        metric_cols[1].metric("Upload", f"{network['upload_mbps']:.2f} Mbps")
+        metric_cols[2].metric("Ping", f"{network['ping_ms']:.2f} ms")
+        metric_cols[3].metric("Security score", f"{latest['security']['score']}/100")
+        st.markdown(f"**Status keamanan: {latest['security']['category']}**")
+        with st.expander("Detail audit keamanan"):
+            for finding in latest["security"]["findings"]:
+                st.write(f"• {finding}")
+        with st.expander("Detail respons layanan (indikasi throttling)"):
+            if latest["throttling"]:
+                for service, result in latest["throttling"].items():
+                    st.write(f"**{service}:** {result['status']} · {result['latency']}")
+            else:
+                st.caption("Belum ada hasil pemeriksaan layanan.")
+
+    render_section_heading("Community overview", "Ringkasan data lokasi komunitas, terpisah dari hasil scan perangkatmu.")
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Lokasi terdaftar", len(locations))
     col2.metric("Kategori aman", safe_count)
     col3.metric("Perlu perhatian", warning_count)
     col4.metric("Risiko tinggi", danger_count)
 
-    st.write("")
     left, right = st.columns([1, 1.7], gap="large")
     with left:
-        render_section_heading("Network health", "Skor keamanan dari hasil scan terbaru")
+        render_section_heading("Community security", "Rata-rata skor dari data lokasi komunitas")
         scores = [number_or_none(item.get("score")) for item in locations]
         scores = [score for score in scores if score is not None]
         average_score = round(sum(scores) / len(scores)) if scores else None
         render_speed_gauge(average_score, label="AVERAGE SECURITY SCORE")
     with right:
-        render_section_heading("Location comparison", "Perbandingan kecepatan download tiap lokasi")
+        render_section_heading("Location comparison", "Perbandingan download antarlokasi komunitas")
         render_location_comparison(locations, metric="download_mbps", height=330)
-
-    render_section_heading("Network assessment", "Distribusi status keamanan jaringan")
-    a, b, c = st.columns(3, gap="medium")
-    with a:
-        render_status_card("AMAN", f"{safe_count} lokasi", "Skor keamanan 80–100.", "good")
-    with b:
-        render_status_card("RAWAN", f"{warning_count} lokasi", "Skor keamanan 50–79.", "warning")
-    with c:
-        render_status_card("BAHAYA", f"{danger_count} lokasi", "Skor keamanan di bawah 50.", "danger")
 
 elif page == "Community Map":
     st.markdown(
