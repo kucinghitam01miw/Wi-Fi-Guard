@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+import pandas as pd
 import streamlit as st
 
 from modules.visualizer import (
@@ -7,6 +11,8 @@ from modules.visualizer import (
     render_section_heading,
     render_speed_gauge,
     render_status_card,
+    render_community_map,
+    render_location_comparison,
 )
 
 st.set_page_config(
@@ -16,87 +22,123 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ---------- Theme ----------
+# ---------- Light theme ----------
 st.markdown(
     """
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
-    :root { --bg:#080f1c; --panel:#142238; --panel2:#1a2b42; --line:#344a65; --muted:#b8c7d9; --text:#f4f8ff; --cyan:#35d5e8; --blue:#638cff; }
-    html, body, [data-testid="stAppViewContainer"] { background:var(--bg); color:var(--text); font-family:'DM Sans',sans-serif; }
-    [data-testid="stHeader"] { background:rgba(8,15,28,.92); }
-    [data-testid="stSidebar"] { background:#0b1626; border-right:1px solid var(--line); }
-    [data-testid="stSidebar"] * { color:var(--text); }
-    .block-container { padding-top:2rem; padding-bottom:3rem; max-width:1440px; }
-    h1,h2,h3,.brand-name,.section-title { font-family:'Space Grotesk',sans-serif !important; }
-    .brand { display:flex; align-items:center; gap:11px; padding:8px 4px 24px; }
-    .brand-mark { width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,#35d5e8,#638cff);display:flex;align-items:center;justify-content:center;color:#06111e;font-size:20px;font-weight:700; }
-    .brand-name { font-size:19px;font-weight:700;letter-spacing:-.5px; }
-    .brand-sub { color:var(--muted);font-size:10px;letter-spacing:1.6px;text-transform:uppercase;margin-top:2px; }
-    .eyebrow { color:var(--cyan);font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px; }
-    .page-title { font-family:'Space Grotesk',sans-serif;font-size:32px;font-weight:700;letter-spacing:-1px;color:var(--text);margin:0; }
-    .page-desc { color:var(--muted);font-size:14px;margin-top:6px; }
-    .topline { border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:24px; }
-    .panel { background:linear-gradient(145deg,#122238,#0e1929);border:1px solid var(--line);border-radius:18px;padding:22px 24px; }
-    .panel-label { color:var(--muted);font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase; }
-    .gauge-wrap { display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px 0 2px; }
-    .gauge { width:218px;height:218px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(from 225deg,var(--cyan) 0 var(--progress),#26364c var(--progress) 75%,transparent 75% 100%);position:relative; }
-    .gauge:before { content:'';position:absolute;inset:10px;border-radius:50%;background:#101d30;border:1px solid #263a52; }
-    .gauge-inner { position:relative;text-align:center; }
-    .gauge-label { color:#9db3ca;font-size:10px;letter-spacing:1.7px;font-weight:700; }
-    .gauge-value { font-family:'Space Grotesk',sans-serif;font-size:49px;font-weight:700;line-height:1.15;color:#f2f8ff;margin-top:8px; }
-    .gauge-value span { font-family:'DM Sans',sans-serif;font-size:12px;color:#9db3ca;font-weight:500; }
-    .gauge-unit { color:var(--cyan);font-size:10px;letter-spacing:1.4px;margin-top:5px; }
-    .gauge-subtext { color:var(--muted);font-size:11px;margin-top:14px; }
-    .metric-card { background:#111f32;border:1px solid var(--line);border-radius:15px;padding:17px 18px;min-height:136px; }
-    .metric-top { display:flex;align-items:center;justify-content:space-between;margin-bottom:14px; }
-    .metric-icon { width:30px;height:30px;display:grid;place-items:center;border-radius:9px;background:#1a3448;color:var(--cyan);font-size:15px; }
-    .metric-note { font-size:10px;color:#b8c7d9; }
-    .metric-title { color:#a9bbce;font-size:12px; }
-    .metric-value { color:#f2f7ff;font-family:'Space Grotesk',sans-serif;font-size:27px;font-weight:700;margin-top:4px; }
-    .metric-value span { font-family:'DM Sans',sans-serif;font-size:12px;color:#91a6bd;font-weight:500; }
-    .section-heading { margin:26px 0 14px; }
-    .section-title { font-size:18px;font-weight:600;color:var(--text); }
-    .section-subtitle { color:var(--muted);font-size:12px;margin-top:3px; }
-    .status-card { display:flex;gap:12px;align-items:flex-start;background:#111f32;border:1px solid var(--line);border-radius:14px;padding:16px;min-height:112px; }
-    .status-dot { width:9px;height:9px;border-radius:50%;background:#8295aa;margin-top:5px;flex-shrink:0; }
-    .status-card.good .status-dot { background:#39d6a2;box-shadow:0 0 12px #39d6a255; }
-    .status-card.warning .status-dot { background:#f5b84b;box-shadow:0 0 12px #f5b84b55; }
-    .status-title { color:#9db1c7;font-size:11px; }
-    .status-value { color:#f0f6ff;font-size:14px;font-weight:700;margin-top:4px; }
-    .status-detail { color:#b8c7d9;font-size:11px;margin-top:4px;line-height:1.45; }
-    .info-banner { background:#10283a;border:1px solid #1d5264;border-radius:12px;padding:13px 16px;color:#b9dce7;font-size:12px;line-height:1.5; }
-    div.stButton > button { background:linear-gradient(100deg,#35d5e8,#638cff);color:#06111e;border:0;border-radius:11px;font-weight:700;padding:.65rem 1rem;min-height:44px; }
-    div.stButton > button:hover { border:0;color:#06111e;filter:brightness(1.08); }
-    /* Input location, SSID, and selectbox */
-div[data-testid="stTextInput"] input,
-div[data-testid="stSelectbox"] div[data-baseweb="select"] {
-    background: #1A2B42 !important;
-    color: #F4F8FF !important;
-    border: 1px solid #526B8A !important;
-    border-radius: 10px;
-}
-
-/* Placeholder text */
-div[data-testid="stTextInput"] input::placeholder {
-    color: #B8C7D9 !important;
-    opacity: 1;
-}
-
-/* Input labels */
-div[data-testid="stTextInput"] label,
-div[data-testid="stSelectbox"] label {
-    color: #D5E1EF !important;
-    font-weight: 600;
-}
-    [data-testid="stMetric"] { background:#111f32;padding:14px;border:1px solid var(--line);border-radius:12px; }
-    [data-testid="stMetricLabel"] { color:#9db1c7; }
-    [data-testid="stMetricValue"] { color:#f2f7ff; }
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+    :root {
+        --bg: #F5F7FB; --surface: #FFFFFF; --surface-soft: #F0F4FA;
+        --line: #DCE3ED; --text: #17243A; --muted: #5F6F85;
+        --blue: #315FBA; --blue-soft: #EAF1FF; --green: #16865B;
+        --yellow: #B77908; --red: #C43D45;
+    }
+    html, body, [data-testid="stAppViewContainer"] {
+        background: var(--bg); color: var(--text);
+        font-family: 'DM Sans', sans-serif;
+    }
+    [data-testid="stHeader"] { background: rgba(245,247,251,.92); }
+    [data-testid="stSidebar"] {
+        background: #FFFFFF; border-right: 1px solid var(--line);
+    }
+    [data-testid="stSidebar"] * { color: var(--text); }
+    .block-container { padding-top: 1.8rem; padding-bottom: 3rem; max-width: 1480px; }
+    h1,h2,h3,.brand-name,.page-title,.section-title {
+        font-family: 'Plus Jakarta Sans', sans-serif !important;
+        color: var(--text) !important;
+    }
+    .brand { display:flex; align-items:center; gap:12px; padding:8px 4px 24px; }
+    .brand-mark {
+        width:42px; height:42px; border-radius:13px; background:#EAF1FF;
+        display:flex; align-items:center; justify-content:center;
+        color:#315FBA; font-size:23px; font-weight:700;
+    }
+    .brand-name { font-size:19px; font-weight:800; letter-spacing:-.5px; }
+    .brand-sub { color:var(--muted); font-size:10px; letter-spacing:1.25px; text-transform:uppercase; margin-top:3px; }
+    .eyebrow { color:var(--blue); font-size:11px; font-weight:700; letter-spacing:1.6px; text-transform:uppercase; margin-bottom:8px; }
+    .page-title { font-size:31px; font-weight:800; letter-spacing:-.8px; margin:0; }
+    .page-desc { color:var(--muted); font-size:14px; margin-top:7px; line-height:1.55; }
+    .topline { border-bottom:1px solid var(--line); padding-bottom:20px; margin-bottom:24px; }
+    .panel { background:var(--surface); border:1px solid var(--line); border-radius:17px; padding:20px 22px; }
+    .panel-label { color:var(--muted); font-size:11px; font-weight:700; letter-spacing:1.2px; text-transform:uppercase; }
+    .info-banner {
+        background:#EAF1FF; border:1px solid #D4E1FC; border-radius:12px;
+        padding:13px 16px; color:#294C88; font-size:13px; line-height:1.55;
+    }
+    div.stButton > button {
+        background:#315FBA; color:#FFFFFF; border:1px solid #315FBA;
+        border-radius:10px; font-weight:700; min-height:42px;
+    }
+    div.stButton > button:hover { background:#244D9D; border-color:#244D9D; color:#FFFFFF; }
+    div[data-testid="stTextInput"] input,
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] {
+        background:#FFFFFF !important; color:#17243A !important;
+        border:1px solid #C9D4E2 !important; border-radius:9px;
+    }
+    div[data-testid="stTextInput"] input::placeholder { color:#78879A !important; opacity:1; }
+    div[data-testid="stTextInput"] label,
+    div[data-testid="stSelectbox"] label,
+    div[data-testid="stRadio"] label { color:#33445C !important; font-weight:600; }
+    [data-testid="stMetric"] {
+        background:#FFFFFF; padding:15px; border:1px solid var(--line); border-radius:13px;
+    }
+    [data-testid="stMetricLabel"] { color:#5F6F85; }
+    [data-testid="stMetricValue"] { color:#17243A; }
+    [data-testid="stDataFrame"] { border:1px solid var(--line); border-radius:12px; }
     hr { border-color:var(--line); }
-    .footer { color:#71869d;font-size:10px;text-align:center;margin-top:36px;padding-top:16px;border-top:1px solid var(--line); }
+    .footer { color:#78879A; font-size:11px; text-align:center; margin-top:34px; padding-top:16px; border-top:1px solid var(--line); }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+
+def load_location_data() -> tuple[list[dict], bool]:
+    """Ambil ringkasan lokasi dari database; gunakan seed sebagai preview jika DB kosong."""
+    try:
+        from modules.database import get_all_locations_summary, init_db
+
+        init_db()
+        rows = get_all_locations_summary()
+        if rows:
+            valid_rows = [dict(row) for row in rows if row.get("latitude") is not None and row.get("longitude") is not None]
+            if valid_rows:
+                return valid_rows, False
+    except Exception as exc:
+        st.warning(f"Database belum dapat dimuat: {exc}")
+
+    seed_path = Path(__file__).resolve().parent / "data" / "seed_data.json"
+    if seed_path.exists():
+        try:
+            with seed_path.open("r", encoding="utf-8") as file:
+                seed = json.load(file)
+            preview = []
+            for location in seed.get("locations_master", []):
+                scan = location.get("initial_scan", {})
+                preview.append({
+                    **location,
+                    **scan,
+                    "timestamp": "Data seed",
+                    "scan_id": None,
+                })
+            return preview, True
+        except (OSError, json.JSONDecodeError):
+            pass
+    return [], False
+
+
+def number_or_none(value):
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+locations, is_preview = load_location_data()
+categories = [str(item.get("category") or "Belum diuji") for item in locations]
+safe_count = sum(category.lower() == "aman" for category in categories)
+warning_count = sum(category.lower() == "rawan" for category in categories)
+danger_count = sum(category.lower() == "bahaya" for category in categories)
 
 # ---------- Sidebar ----------
 with st.sidebar:
@@ -104,84 +146,122 @@ with st.sidebar:
         '<div class="brand"><div class="brand-mark">⌁</div><div><div class="brand-name">WiFi-Radar ID</div><div class="brand-sub">Public Wi-Fi Intelligence</div></div></div>',
         unsafe_allow_html=True,
     )
-    page = st.radio(
-        "NAVIGATION",
-        ["Overview", "Community Map", "Scan History"],
-        label_visibility="visible",
-    )
+    page = st.radio("NAVIGATION", ["Overview", "Community Map", "Scan History"])
     st.markdown("---")
-    st.markdown("<div class='panel-label'>SYSTEM STATUS</div>", unsafe_allow_html=True)
-    st.caption("● UI prototype · Scanner not connected")
+    st.markdown('<div class="panel-label">DATA STATUS</div>', unsafe_allow_html=True)
+    if is_preview:
+        st.caption("● Seed data preview · bukan pengukuran langsung")
+    else:
+        st.caption("● Data dari database")
     st.markdown("---")
     st.caption("WiFi-Radar ID · Project Prototype")
 
 if page == "Overview":
     st.markdown(
-        '<div class="topline"><div class="eyebrow">NETWORK INTELLIGENCE PLATFORM</div><div class="page-title">Wi-Fi Overview</div><div class="page-desc">Understand your public Wi-Fi connection, quality, and security at a glance.</div></div>',
+        '<div class="topline"><div class="eyebrow">NETWORK INTELLIGENCE PLATFORM</div><div class="page-title">Wi-Fi Overview</div><div class="page-desc">Lihat ringkasan kualitas dan keamanan jaringan Wi-Fi publik dari data komunitas.</div></div>',
         unsafe_allow_html=True,
     )
 
-    left, right = st.columns([1.05, 1.95], gap="large")
+    if is_preview:
+        st.markdown(
+            '<div class="info-banner">Dashboard sedang menampilkan data awal dari <b>data/seed_data.json</b> sebagai preview. Data ini bukan hasil pemindaian langsung dan akan tergantikan ketika database berisi hasil scan.</div>',
+            unsafe_allow_html=True,
+        )
+        st.write("")
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Lokasi terdaftar", len(locations))
+    col2.metric("Kategori aman", safe_count)
+    col3.metric("Perlu perhatian", warning_count)
+    col4.metric("Risiko tinggi", danger_count)
+
+    st.write("")
+    left, right = st.columns([1, 1.7], gap="large")
     with left:
-        st.markdown('<div class="panel-label">NETWORK HEALTH</div>', unsafe_allow_html=True)
-        render_speed_gauge(st.session_state.get("demo_score"))
-        st.markdown('<div class="info-banner">Your network overview will appear here after the scanner module is connected.</div>', unsafe_allow_html=True)
-
+        render_section_heading("Network health", "Skor keamanan dari hasil scan terbaru")
+        scores = [number_or_none(item.get("score")) for item in locations]
+        scores = [score for score in scores if score is not None]
+        average_score = round(sum(scores) / len(scores)) if scores else None
+        render_speed_gauge(average_score, label="AVERAGE SECURITY SCORE")
     with right:
-        render_section_heading("Connection metrics", "Core Quality of Service (QoS) measurements")
-        demo = st.session_state.get("demo_metrics")
-        if demo:
-            vals = demo
-        else:
-            vals = {"download": "--", "upload": "--", "ping": "--", "jitter": "--"}
-        cols = st.columns(2, gap="medium")
-        with cols[0]:
-            render_metric_card("Download", vals["download"], "Mbps", "↓ DOWNLOAD", "↓")
-            render_metric_card("Ping / Latency", vals["ping"], "ms", "◉ RESPONSE", "◌")
-        with cols[1]:
-            render_metric_card("Upload", vals["upload"], "Mbps", "↑ UPLOAD", "↑")
-            render_metric_card("Jitter", vals["jitter"], "ms", "≈ STABILITY", "⌁")
+        render_section_heading("Location comparison", "Perbandingan kecepatan download tiap lokasi")
+        render_location_comparison(locations, metric="download_mbps", height=330)
 
-    render_section_heading("Network assessment", "A quick look at neutrality indicators and public Wi-Fi security")
+    render_section_heading("Network assessment", "Distribusi status keamanan jaringan")
     a, b, c = st.columns(3, gap="medium")
     with a:
-        render_status_card("NET NEUTRALITY", "Awaiting test", "Traffic comparison is not available yet.")
+        render_status_card("AMAN", f"{safe_count} lokasi", "Skor keamanan 80–100.", "good")
     with b:
-        render_status_card("WI-FI SECURITY", "Awaiting audit", "Encryption and security checks will appear here.")
+        render_status_card("RAWAN", f"{warning_count} lokasi", "Skor keamanan 50–79.", "warning")
     with c:
-        render_status_card("AI ADVISOR", "Standby", "Recommendations will appear after a scan.")
-
-    render_section_heading("Run a network check", "The interface is ready; live measurement is waiting for the scanner module.")
-    loc_col, ssid_col = st.columns(2)
-    with loc_col:
-        location = st.text_input("LOCATION", placeholder="e.g. Perpustakaan UGM")
-    with ssid_col:
-        ssid = st.text_input("WI-FI NAME / SSID", placeholder="Enter network name (optional)")
-    button_col, note_col = st.columns([1, 2])
-    with button_col:
-        if st.button("▶  Start network test", use_container_width=True):
-            st.info("Network scanner belum terhubung. Tombol ini akan menjalankan pengujian live setelah `network_scanner.py` siap.")
-    with note_col:
-        st.caption("Location and SSID are descriptive inputs for the prototype. Do not enter a Wi-Fi password.")
-
-    with st.expander("Preview dashboard with sample data"):
-        st.caption("Sample values below are illustrative only, not real measurements from your network.")
-        if st.button("Load sample preview"):
-            st.session_state["demo_score"] = 86
-            st.session_state["demo_metrics"] = {"download": "48.6", "upload": "21.3", "ping": "18", "jitter": "3.2"}
-            st.rerun()
-        if st.button("Clear sample preview"):
-            st.session_state.pop("demo_score", None)
-            st.session_state.pop("demo_metrics", None)
-            st.rerun()
+        render_status_card("BAHAYA", f"{danger_count} lokasi", "Skor keamanan di bawah 50.", "danger")
 
 elif page == "Community Map":
-    st.markdown('<div class="topline"><div class="eyebrow">COMMUNITY NETWORK DATA</div><div class="page-title">Community Map</div><div class="page-desc">Explore public Wi-Fi quality and security reports shared by the community.</div></div>', unsafe_allow_html=True)
-    st.markdown('<div class="panel"><div class="panel-label">MAP MODULE</div><h3>Community coverage map</h3><p style="color:#9db1c7">The map will be connected after the community database and location visualizer are ready.</p></div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="topline"><div class="eyebrow">COMMUNITY NETWORK DATA</div><div class="page-title">Community Map</div><div class="page-desc">Jelajahi lokasi Wi-Fi publik dan bandingkan kualitas koneksi serta skor keamanannya.</div></div>',
+        unsafe_allow_html=True,
+    )
+    if is_preview:
+        st.markdown(
+            '<div class="info-banner">Peta dan grafik saat ini memakai data seed untuk demonstrasi. Nilainya belum tentu mencerminkan kondisi jaringan saat ini.</div>',
+            unsafe_allow_html=True,
+        )
+        st.write("")
+
+    if locations:
+        selected_status = st.selectbox("Filter status keamanan", ["Semua status", "Aman", "Rawan", "Bahaya"])
+        filtered = locations if selected_status == "Semua status" else [
+            item for item in locations if str(item.get("category", "")).lower() == selected_status.lower()
+        ]
+        render_community_map(filtered)
+        st.write("")
+        metric_options = {
+            "Download (Mbps)": "download_mbps",
+            "Upload (Mbps)": "upload_mbps",
+            "Ping (ms)": "ping_ms",
+            "Skor keamanan": "score",
+        }
+        selected_metric = st.selectbox("Metrik perbandingan", list(metric_options.keys()))
+        render_location_comparison(filtered, metric=metric_options[selected_metric], height=390)
+
+        table_rows = []
+        for item in filtered:
+            table_rows.append({
+                "Lokasi": item.get("name", "-"),
+                "Area": item.get("area", "-"),
+                "Download (Mbps)": item.get("download_mbps"),
+                "Upload (Mbps)": item.get("upload_mbps"),
+                "Ping (ms)": item.get("ping_ms"),
+                "Skor": item.get("score"),
+                "Status": item.get("category", "Belum diuji"),
+            })
+        render_section_heading("Location details", "Ringkasan hasil scan terbaru per lokasi")
+        st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+    else:
+        st.info("Belum ada data lokasi. Tambahkan lokasi dan hasil pengujian melalui modul database.")
 
 else:
-    st.markdown('<div class="topline"><div class="eyebrow">YOUR NETWORK RECORDS</div><div class="page-title">Scan History</div><div class="page-desc">Review previous network checks and compare connection quality over time.</div></div>', unsafe_allow_html=True)
-    st.markdown('<div class="panel"><div class="panel-label">SCAN LOGS</div><h3>No scan history yet</h3><p style="color:#9db1c7">Completed scans will be stored here after the database module is connected.</p></div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="topline"><div class="eyebrow">YOUR NETWORK RECORDS</div><div class="page-title">Scan History</div><div class="page-desc">Lihat hasil pengujian jaringan yang tersimpan di database.</div></div>',
+        unsafe_allow_html=True,
+    )
+    try:
+        from modules.database import get_scan_history
 
-st.markdown('<div class="footer">WI-FI RADAR ID · COMMUNITY-DRIVEN PUBLIC WI-FI MONITORING</div>', unsafe_allow_html=True)
+        history = get_scan_history(limit=100)
+    except Exception as exc:
+        history = []
+        st.warning(f"Riwayat belum dapat dimuat: {exc}")
 
+    if history:
+        history_df = pd.DataFrame(history)
+        preferred = ["timestamp", "name", "ssid", "download_mbps", "upload_mbps", "ping_ms", "jitter_ms", "score", "category"]
+        available = [column for column in preferred if column in history_df.columns]
+        st.dataframe(history_df[available], use_container_width=True, hide_index=True)
+    else:
+        st.info("Belum ada riwayat scan yang tersimpan. Data seed hanya digunakan untuk preview peta dan grafik.")
+
+st.markdown(
+    '<div class="footer">WI-FI RADAR ID · COMMUNITY-DRIVEN PUBLIC WI-FI MONITORING</div>',
+    unsafe_allow_html=True,
+)
