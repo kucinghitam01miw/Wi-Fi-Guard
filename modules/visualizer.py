@@ -59,6 +59,30 @@ def render_speed_gauge(value: float | None = None, label: str = "NETWORK SCORE")
     )
 
 
+def render_speedometer(download_mbps: float, max_speed: float = 100) -> None:
+    """Menampilkan kecepatan download aktual dalam bentuk speedometer."""
+    speed = max(0.0, float(download_mbps))
+    progress = max(0.0, min(100.0, speed / max_speed * 100))
+    st.markdown(
+        f"""
+        <div style="background:#FFFFFF;border:1px solid #DCE3ED;border-radius:17px;padding:22px;text-align:center;">
+          <div style="font-size:11px;color:#5F6F85;font-weight:700;letter-spacing:1.3px;">DOWNLOAD SPEED</div>
+          <div style="width:230px;height:230px;border-radius:50%;margin:18px auto 10px;
+              display:grid;place-items:center;
+              background:conic-gradient(from 135deg,#315FBA 0deg,{progress * 2.7}deg,#E8EDF5 {progress * 2.7}deg 270deg,transparent 270deg 360deg);">
+            <div style="width:184px;height:184px;border-radius:50%;background:#FFFFFF;
+                display:flex;flex-direction:column;align-items:center;justify-content:center;">
+              <div style="font-size:43px;font-weight:800;line-height:1.1;color:#17243A;">{speed:.2f}</div>
+              <div style="font-size:13px;color:#5F6F85;">Mbps</div>
+            </div>
+          </div>
+          <div style="font-size:11px;color:#718096;">Skala visual 0–{max_speed:.0f} Mbps</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_metric_card(title: str, value: str, unit: str, note: str, icon: str) -> None:
     """Menampilkan satu kartu metrik."""
     st.markdown(
