@@ -212,7 +212,6 @@ def render_location_comparison(
         y="Lokasi",
         color="Status",
         orientation="h",
-        color="Status",
         color_discrete_map=color_map,
         text="Nilai",
         labels={"Nilai": f"{label} ({unit})", "Lokasi": ""},
