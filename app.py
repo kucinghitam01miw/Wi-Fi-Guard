@@ -99,12 +99,32 @@ def load_location_data() -> tuple[list[dict], bool]:
     try:
         import modules.database as database
 
-        # Repo menyimpan seed_data.json di folder data/, bukan di root.
-        database.SEED_FILE_PATH = str(Path(__file__).resolve().parent / "data" / "seed_data.json")
+        # Buat tabel tanpa memasukkan initial_scan contoh ke tabel riwayat.
+        database.SEED_FILE_PATH = "__seed_file_disabled__"
         database.init_db()
-        get_all_locations_summary = database.get_all_locations_summary
-        rows = get_all_locations_summary()
-        if rows:
+
+        seed_path = Path(__file__).resolve().parent / "data" / "seed_data.json"
+        if seed_path.exists():
+            with seed_path.open("r", encoding="utf-8") as seed_file:
+                seed = json.load(seed_file)
+            conn = database.get_connection()
+            cursor = conn.cursor()
+            for location in seed.get("locations_master", []):
+                cursor.execute(
+                    """INSERT OR IGNORE INTO locations_master
+                    (location_id, name, area, ssid, isp, latitude, longitude)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        location["location_id"], location["name"], location["area"],
+                        location["ssid"], location.get("isp", "Unknown"),
+                        location["latitude"], location["longitude"],
+                    ),
+                )
+            conn.commit()
+            conn.close()
+
+        rows = database.get_all_locations_summary()
+        if rows and any(row.get("scan_id") is not None for row in rows):
             valid_rows = [dict(row) for row in rows if row.get("latitude") is not None and row.get("longitude") is not None]
             if valid_rows:
                 return valid_rows, False
